@@ -4,10 +4,7 @@ from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    MessageHandler,
     ContextTypes,
-    ConversationHandler,
-    filters,
 )
 
 # Logging setup
@@ -15,35 +12,27 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
-# States for Menu / Input selection
-CHOOSING, GET_DATA = range(2)
-
-BOT_TOKEN = "8213911171:AAH2JDDmtWeDkVH3DBZUOgOt_FZrPzeA-EY"
+BOT_TOKEN = "8213911171:AAGXz1V8E1Ht9-1Q8YpQd8dxrQEdGScUA30"
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command to show options"""
     await update.message.reply_text(
         "👋 Welcome! Kripya select karein aap kya check karna chahte hain:\n\n"
-        "1️⃣ /num - Phone Number / Aadhaar Lookup\n"
-        "2️⃣ /ifsc - Bank IFSC Code Details\n"
-        "3️⃣ /pincode - Postal Pincode Details\n"
-        "4️⃣ /ip - IP Address Geolocation\n\n"
-        "Ya seedhe command type karein (jaise `/num 9876543210` ya `/ifsc HDFC0000123`)."
+        "1️⃣ /num [number] - Phone / Details Lookup\n"
+        "2️⃣ /ifsc [code] - Bank IFSC Code Details\n"
+        "3️⃣ /pincode [pincode] - Postal Pincode Details\n"
+        "4️⃣ /ip [ip_address] - IP Address Geolocation\n\n"
+        "Example: `/num 9876543210` ya `/pincode 110001`",
+        parse_mode="Markdown"
     )
-    return CHOOSING
 
 
-async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = update.message.text.strip()
-    return CHOOSING
-
-
-# --- 1. Number / Aadhaar Lookup Handler ---
+# --- 1. Number Lookup Handler (Formatted Nicely) ---
 async def lookup_num_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
-        await update.message.reply_text("Kripya number dalein. Example: `/num 9876543210`", parse_mode="Markdown")
+        await update.message.reply_text("❌ Kripya number dalein.\nExample: `/num 9876543210`", parse_mode="Markdown")
         return
 
     query_value = args[0]
@@ -54,7 +43,18 @@ async def lookup_num_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
-            await update.message.reply_text(f"✅ **Result:**\n```json\n{data}\n```", parse_mode="Markdown")
+            
+            # Agar data dictionary format me hai toh usey clean bullet points me convert karein
+            if isinstance(data, dict) and data:
+                text = f"📱 **Lookup Result for `{query_value}`:**\n\n"
+                for key, value in data.items():
+                    # Key ko capitalize karke clean format dena
+                    formatted_key = str(key).replace('_', ' ').title()
+                    text += f"• **{formatted_key}:** {value}\n"
+                await update.message.reply_text(text, parse_mode="Markdown")
+            else:
+                # Fallback agar data list ya kuch aur ho
+                await update.message.reply_text(f"✅ **Result:**\n`{data}`", parse_mode="Markdown")
         else:
             await update.message.reply_text("❌ API se data fetch karne me error aaya.")
     except Exception as e:
@@ -65,7 +65,7 @@ async def lookup_num_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def lookup_ifsc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
-        await update.message.reply_text("Kripya IFSC code dalein. Example: `/ifsc HDFC0000123`", parse_mode="Markdown")
+        await update.message.reply_text("❌ Kripya IFSC code dalein.\nExample: `/ifsc HDFC0000123`", parse_mode="Markdown")
         return
 
     ifsc_code = args[0].upper()
@@ -76,7 +76,7 @@ async def lookup_ifsc_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         if response.status_code == 200:
             data = response.json()
             text = (
-                f"🏦 **Bank Details:**\n"
+                f"🏦 **Bank Details ({ifsc_code}):**\n"
                 f"• **Bank:** {data.get('BANK')}\n"
                 f"• **Branch:** {data.get('BRANCH')}\n"
                 f"• **City:** {data.get('CITY')}\n"
@@ -90,30 +90,44 @@ async def lookup_ifsc_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"⚠️ Error: {e}")
 
 
-# --- 3. Pincode Handler ---
+# --- 3. Pincode Handler (Fixed & Enhanced) ---
 async def lookup_pincode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
-        await update.message.reply_text("Kripya Pincode dalein. Example: `/pincode 110001`", parse_mode="Markdown")
+        await update.message.reply_text("❌ Kripya Pincode dalein.\nExample: `/pincode 110001`", parse_mode="Markdown")
         return
 
-    pincode = args[0]
+    pincode = args[0].strip()
     url = f"https://api.postalpincode.in/pincode/{pincode}"
     
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
-            if data and data[0].get('Status') == 'Success':
-                post_offices = data[0].get('PostOffice', [])
-                text = f"📍 **Pincode Details ({pincode}):**\nFound {len(post_offices)} post office(s):\n"
-                for po in post_offices[:5]: # Max 5 display karenge taaki message lamba na ho
-                    text += f"• {po.get('Name')} ({po.get('District')}, {po.get('State')})\n"
-                await update.message.reply_text(text, parse_mode="Markdown")
+            
+            # API response structure check karein
+            if isinstance(data, list) and len(data) > 0:
+                result_obj = data[0]
+                status = result_obj.get('Status')
+                
+                if status == 'Success':
+                    post_offices = result_obj.get('PostOffice', [])
+                    text = f"📍 **Pincode Details ({pincode}):**\nFound {len(post_offices)} post office(s):\n\n"
+                    
+                    for po in post_offices[:8]:  # Max 8 post offices display karenge
+                        name = po.get('Name', 'N/A')
+                        district = po.get('District', 'N/A')
+                        state = po.get('State', 'N/A')
+                        delivery = po.get('DeliveryStatus', 'N/A')
+                        text += f"🏛️ **{name}**\n   • District: {district}\n   • State: {state}\n   • Type: {delivery}\n\n"
+                        
+                    await update.message.reply_text(text, parse_mode="Markdown")
+                else:
+                    await update.message.reply_text("❌ Invalid Pincode or no records found.")
             else:
-                await update.message.reply_text("❌ Invalid Pincode or no records found.")
+                await update.message.reply_text("❌ Invalid response format from Postal API.")
         else:
-            await update.message.reply_text("❌ Failed to fetch pincode details.")
+            await update.message.reply_text("❌ Failed to connect to Postal API.")
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error: {e}")
 
@@ -122,7 +136,7 @@ async def lookup_pincode_command(update: Update, context: ContextTypes.DEFAULT_T
 async def lookup_ip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
-        await update.message.reply_text("Kripya IP address dalein. Example: `/ip 8.8.8.8`", parse_mode="Markdown")
+        await update.message.reply_text("❌ Kripya IP address dalein.\nExample: `/ip 8.8.8.8`", parse_mode="Markdown")
         return
 
     ip_address = args[0]
@@ -143,7 +157,7 @@ async def lookup_ip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 await update.message.reply_text(text, parse_mode="Markdown")
             else:
-                await update.message.reply_text(f"❌ API Error: {data.get('message')}")
+                await update.message.reply_text(f"❌ API Error: {data.get('message', 'Unknown error')}")
         else:
             await update.message.reply_text("❌ Failed to fetch IP details.")
     except Exception as e:
@@ -160,10 +174,10 @@ def main():
     app.add_handler(CommandHandler("pincode", lookup_pincode_command))
     app.add_handler(CommandHandler("ip", lookup_ip_command))
 
-    print("🤖 All-in-One API Bot is running...")
+    print("🤖 All-in-One API Bot is running smoothly...")
     app.run_polling()
 
 
 if __name__ == "__main__":
     main()
-    
+        
